@@ -177,21 +177,20 @@ def EI(KL_GP, z, PCE_DOE=None, *args):
     std_z = np.std(y_z, ddof=1)
     return np.sum((y_DOE - mean_z) * stats.norm.cdf((y_DOE - mean_z)/std_z) + std_z*stats.norm.pdf((y_DOE - mean_z)/std_z))/samples.shape[0]
 
-def find_z_next(KL_GP):
-    z_range = [-5, 5]
+def find_z_next(KL_GP, z_range, n_starting_points=20):
     def EI_(z, *args):
         # n inputs
         z = z_range[0] + ((z_range[1]-z_range[0])*z)
         return -EI(KL_GP, z)
     z_min = minimize(EI_, rng.uniform(0., 1.), method='COBYLA', options={'rhobeg': 0.5}, bounds=[(0., 1.)])
     print(z_range[0] + ((z_range[1]-z_range[0])*z_min.x), z_min.fun)
-    for i in tqdm(range(19)):
+    for i in tqdm(range(n_starting_points-1)):
         z_new = minimize(EI_, rng.uniform(0., 1.), method='COBYLA', options={'rhobeg': 0.5}, bounds=[(0., 1.)])
 
         if z_new.fun < z_min.fun:
             z_min = z_new
         print(z_range[0] + ((z_range[1]-z_range[0])*z_new.x), z_new.fun)
-    return z_min
+    return z_range[0] + ((z_range[1]-z_range[0])*z_min.x), z_min.fun
 
 def calc_Pmin(KL_GP):
     PCE_DOE = srg.PCE_z_DOE(KL_GP)
@@ -212,4 +211,82 @@ def calc_Pmin(KL_GP):
     Pmin = is_min.sum(axis=0)/is_min.shape[0]
 
     return Pmin
+
+def calc_cv(KL_GP, PCE):
+    samples = KL_GP['gaussian'].sample(10000)
+    vals = PCE(*samples)
+    mean_pce = np.mean(vals)
+    var_pce = np.std(vals, ddof=1)
+
+    if np.abs(mean_pce) < 1e-9:
+        return np.sqrt(var_pce)
+    else:
+        # should we have abs here?
+        return np.sqrt(var_pce)/np.abs(mean_pce)
+
+def enrich_surrogates(surrogates, y1, y2, KL_GP, z_DOE, e_cv=0.01):
+    Pmin = calc_Pmin(KL_GP)
+
+    P_order = np.argsort(-Pmin)
+
+    print(z_DOE, Pmin)
+    z_DOE = z_DOE[P_order]
+    Pmin  = Pmin[P_order]
+    print(z_DOE, Pmin)
+    
+    PCE_DOE = PCE_z_DOE(KL_GP)
+    
+    for i, z in enumerate(z_DOE):
+
+        # kept picking the same z to enrich, because the list of z values was sorted while the PCE list was not
+        # leading to the wrong PCE being picked, and the cv being always high (since the z value to which the PCE does
+        # correspond is never enhanced). PCE and the corresponding z value should really be stored in a data structure together
+        # is stored also so there is no confusion about this.
+        PCE = PCE_DOE[P_order[i]]
+        
+        if Pmin[i] > 1./z_DOE.shape[0]:
+            print('cv', calc_cv(KL_GP, PCE))
+            if calc_cv(KL_GP, PCE) > e_cv:
+                # update disciplinary solver
+                y_ = solve_surrogate(surrogates, np.array([[0., 0.]]), np.array([z])).flatten()
+                
+                prev_xt_0, prev_yt_0 = surrogates[0].training_points[None][0]
+                prev_xt_1, prev_yt_1 = surrogates[1].training_points[None][0]       
+            
+                xt_0 = np.vstack((prev_xt_0, np.hstack((z, y_[1]))))
+                xt_1 = np.vstack((prev_xt_1, np.hstack((z, y_[0]))))
+
+                yt_0 = np.vstack((prev_yt_0, y1(*xt_0[-1, :])))
+                yt_1 = np.vstack((prev_yt_1, y2(*xt_1[-1, :])))
+
+                surrogates[0].set_training_values(xt_0, yt_0)
+                surrogates[0].train()
+
+                surrogates[1].set_training_values(xt_1, yt_1)
+                surrogates[1].train()
+            
+                return (xt_0[-1, :], yt_0[-1]), (xt_1[-1, :], yt_1[-1])
+    # did not have to enhance disciplinary solver
+    return None, None
+
+def optim(surrogates, y1, y2, f, z_DOE_init, zlims, n_iter=20, callback=None):
+
+    z_DOE = z_DOE_init.copy()
+    KL_GP = construct_KL_GP(surrogates, f, z_DOE, 3, 100)
+    for iteration in range(n_iter):
+        print(iteration, z_DOE)
+        
+        z_new, f_new = find_z_next(KL_GP, zlims, n_starting_points=20)
+        
+        z_DOE = np.concatenate((z_DOE, np.array(z_new)), axis=0)
+        print(z_DOE)
+        KL_GP = construct_KL_GP(surrogates, f, z_DOE, 3, 100)
+        
+        pt1, pt2 = enrich_surrogates(surrogates, y1, y2, KL_GP, z_DOE)
+        
+        KL_GP = construct_KL_GP(surrogates, f, z_DOE, 3, 100)    
+        
+        if callback is not None:
+            callback(iteration, surrogates, KL_GP, z_new, pt1, pt2)
+    return KL_GP, find_z_next(KL_GP, zlims)
  
