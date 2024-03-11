@@ -95,6 +95,9 @@ def construct_KL_GP(surrogates, f_obj, z_DOE, order, N=100):
 
     eigval, phi = np.linalg.eig(K)
 
+    eigval = eigval.real
+    phi = phi.real
+
     # interpolate mean and eigenvectors, according to Dubreuil et al. (2020)
     phi_GP = [KRG(theta0=[1e-2], print_prediction=False, print_global=False) for i in range(len(z_DOE)+1)]
 
@@ -193,7 +196,7 @@ def find_z_next(KL_GP, z_range, n_starting_points=20):
     return z_range[0] + ((z_range[1]-z_range[0])*z_min.x), z_min.fun
 
 def calc_Pmin(KL_GP):
-    PCE_DOE = srg.PCE_z_DOE(KL_GP)
+    PCE_DOE = PCE_z_DOE(KL_GP)
     
     samples = KL_GP['gaussian'].sample(10000)
 
