@@ -110,3 +110,30 @@ def plot_surrogates(surrogate_1, surrogate_2, xlims, ylims, z, filename='surroga
     plt.savefig(filename, dpi=300)
     return ax
 
+def visualize_optim_run(surrogates, KL_GP, z_new, pt1, pt2, z_lims, xlims, ylims, iteration=0, dir='img/'):
+    z_vals = np.linspace(*z_lims, 100)
+
+    # sample EI at these points
+    EI_vals = []
+    for i, z in enumerate(z_vals):
+        EI_vals.append(srg.EI(KL_GP, z))
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.plot(z_vals, EI_vals)
+    ax.axvline(z_new)
+    plt.savefig(dir + '%d_EI.png' % iteration, dpi=300)
+    
+    print(surrogates[0].training_points[None], surrogates[1].training_points[None])
+    print('Pts', pt1, pt2)
+    # plot surrogates at the z which was enriched (not necessarily z_new)
+    
+    if pt1 is not None:
+        ax = plot_surrogates(*surrogates, xlims, ylims, pt1[0][0])
+        ax.scatter(pt1[0][1], pt1[1], marker='x', color='blue')
+        ax.scatter(pt2[1], pt2[0][1], marker='x', color='green')
+        ax.set_title('z: %.2f (z_new: %.2f; cv: %.3f)' % (pt1[0][0], z_new, srg.calc_cv(KL_GP, srg.PCE_z(KL_GP, pt1[0][0]))))
+    else:
+        ax = plot_surrogates(*surrogates, xlims, ylims, z_new)
+        ax.set_title('z=z_new: %.2f (no surrogate enhancement; cv (z_new): %.3f)' % (z_new, srg.calc_cv(KL_GP, srg.PCE_z(KL_GP, z_new))))
+    plt.savefig(dir + '%d_surrogates.png' % iteration, dpi=300)
+    
+
