@@ -137,7 +137,7 @@ class KL_GP():
                 var  += np.power(self.A[:, j] @ self.phi[k] * self.expansion[j](xi[:, 0], xi[:, 1]), 2.) * var_gp
         sigma = np.sqrt(var)
         return xi, mean, sigma
-    
+    # does not work yet
     def getGaussianStatisticsVectorized(self, z, xi=None, n_samples=10000):
         if type(z) is float and self.SCP.dim_z == 1:
             z = np.array([z])
@@ -191,9 +191,9 @@ class KL_GP():
         #_, min_DoE, sigma_DoE = self.getGaussianStatistics(self.DoE_z[0, :], xi)
         # was part of DoE, so we do not expect any variance
         #assert np.max(np.abs(sigma_DoE)) < 1e-6, np.abs(sigma_DoE).max()
+        
         min_DoE = self.PCE_DoE[0](xi[:, 0], xi[:, 1])
 
-        # you can probably cache this
         for i, z_ in enumerate(self.DoE_z[1:, :]):
             #_, mean_DoE, sigma_DoE = self.getGaussianStatistics(z_, xi)
             
@@ -203,12 +203,9 @@ class KL_GP():
             
             min_DoE = np.minimum(min_DoE, mean_DoE)
         
-        # or min_DoE - mean?
-        
         EI_calc = (min_DoE - mean) * stats.norm.cdf((min_DoE - mean)/sigma)\
                   + sigma * stats.norm.pdf((min_DoE - mean)/sigma)
-        # if sigma < 1e-6, EI is 0 here (and z is probably part of DoE_z)
-        #EI_calc = np.where(sigma < 1e-1, 0., EI_calc)
+        
         if EI_calc.min() < 0.:
             print(z, np.max(sigma), sigma.min(), EI_calc.min(), mean, )
         return xi, np.mean(EI_calc)
@@ -226,7 +223,6 @@ class KL_GP():
     def add_z(self, z):
         if (type(z) == float or type(z) == np.float64) and self.SCP.dim_z == 1:
             z = np.array([z])
-        print(self.DoE_z.shape, z.shape)
         self.DoE_z = np.concatenate((self.DoE_z, np.array([z])), axis=0)
         self.PCE_DoE.append(PCE(z, self.SCP, self.order))
         
@@ -250,7 +246,6 @@ class KL_GP():
             return -EI_calc
         
         z_samples = self.sampling_z(n_starting_points)
-        z_samples[0, :] = np.array([0., 2.634, 0.])
         z_min = minimize(EI_, z_samples[0], method='COBYLA', options={'rhobeg': 0.5}, bounds=[(0., 1.)])
         print(z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_min.x), z_min.fun)
         
