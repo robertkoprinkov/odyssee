@@ -60,6 +60,6 @@ class ScalarCoupledProblem():
             if np.all(np.abs(y_prev-y) < tol_abs): # converged
                 break
 
-        converged = np.all(np.abs(y_prev - y) < tol_abs, axis=0)
+        converged = np.all(np.abs(y_prev - y) < tol_abs, axis=1)
 
         return converged, y
