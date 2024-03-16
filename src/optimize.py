@@ -24,9 +24,9 @@ class Optimize():
     def optimization_step(self):
         z_next, f_z_next = self.KL_GP.z_next(n_starting_points=self.n_starting_points_z)
         print(z_next, f_z_next) 
-        if np.abs(f_z_next) < 1e-6:
-            print('Negligible improvement', z_next, f_z_next)
-            return
+        #if np.abs(f_z_next) < 1e-6:
+        #    print('Negligible improvement', z_next, f_z_next)
+        #    return
         self.KL_GP.add_z(z_next)
 
         z_DoE, Pmin = self.KL_GP.Pmin()

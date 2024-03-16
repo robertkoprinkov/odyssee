@@ -86,10 +86,10 @@ class PCE():
         vals = self.PCE(samples[:, 0], samples[:, 1])
         
         mean_pce = np.mean(vals)
-        var_pce = np.std(vals, ddof=1)
+        sigma_pce = np.std(vals, ddof=1)
 
         if np.abs(mean_pce) < 1e-9:
-            return np.sqrt(var_pce)
+            return sigma_pce
         else:
             # should we have abs here?
-            return np.sqrt(var_pce)/np.abs(mean_pce)
+            return sigma_pce/np.abs(mean_pce)

@@ -30,10 +30,10 @@ DoE_z = LHS(xlimits=problem.lims_z, random_state=20)(20)
 klgp = KL_GP(DoE_z, sproblem, 3)
 
 optim = Optimize(klgp, n_starting_points_z=20)
+#optim.KL_GP.add_z(np.array([0., 2.634, 0.]))
 
-for i in tqdm(range(10)):
+for i in tqdm(range(20)):
     #fig, ax = plotter.plot_surrogates(optim.KL_GP, -3., 'img/%d_surrogate.png' % i)
-    optim.KL_GP.add_z(np.array([0., 2.634, 0.]))
     print(optim.optimization_step())
     print(optim.KL_GP.SCP.y1.DoE_z)
 
