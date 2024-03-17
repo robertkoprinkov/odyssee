@@ -4,12 +4,13 @@ from smt.surrogate_models import KRG
 class Surrogate():
     """
         Initialize surrogate model
-        @param f_original Function that takes an np.ndarray of size self.input_dim = DoE_y[1]
-        @param DoE        Points to condition surrogate model on. np.ndarray of shape 
-                          (n_train, self.input_dim)
-        @param f_DoE      (Optional) Values that f takes on the points DoE. 
-                          np.ndarray of shape (n_train, self.output_dim)
-        @param output_dim Output dimension. Only support output_dim=1 for now.
+        @param f_original    Function that takes an np.ndarray of size self.input_dim = DoE_y[1]
+        @param DoE_z         Points to condition surrogate model on. np.ndarray of shape 
+                             (n_train, self.input_dim_z)
+        @param DoE_coupling  Idem. np.ndarray of shape (n_train, self.input_dim_coupling)
+        @param f_DoE         (Optional) Values that f takes on the points DoE. 
+                             np.ndarray of shape (n_train, self.output_dim)
+        @param output_dim    Output dimension. Only support output_dim=1 for now.
     """
 
     def __init__(self, f_original, DoE_z, DoE_coupling, f_DoE=None, output_dim=1):
@@ -54,7 +55,7 @@ class Surrogate():
     """
     def sample(self, z, y_coupling, xi=None):
         if len(z.shape) == 1 and len(y_coupling) != 1:
-            z = np.repeat(z, y_coupling.shape[0], axis=0)
+            z = np.repeat(np.array([z]), y_coupling.shape[0], axis=0)
         
         assert(z.shape[0] == y_coupling.shape[0])
         assert(z.shape[1] == self.input_dim_z and y_coupling.shape[1] == self.input_dim_coupling)
