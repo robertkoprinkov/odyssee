@@ -36,7 +36,7 @@ class PCE():
         if SCP is not None:
             self.expansion = cp.generate_expansion(order, cp.J(cp.Normal(0., 1.), cp.Normal(0., 1.)))
             
-            xi_samples = self.rng.normal(size=(10*self.expansion.size, 2))
+            xi_samples = self.rng.normal(size=(N, 2))
             
             converged, y_sol = SCP.solve(z, xi=xi_samples)
             
@@ -45,13 +45,13 @@ class PCE():
                 y_sol = y_sol[converged]
                 xi_samples = xi_samples[converged, :]
             
-            if (type(z) == float or type(z) == np.float64) and self.SCP.dim_z == 1:
+            if isinstance(z, float) and self.SCP.dim_z == 1:
                 z = np.array([z])
             if len(z.shape) == 1:
                 z = np.array([z])
-            f_val = SCP.f_obj(z, y_sol[:self.expansion.size, :SCP.dim_y1], y_sol[:self.expansion.size, SCP.dim_y1:])
+            f_val = SCP.f_obj(z, y_sol[:, :SCP.dim_y1], y_sol[:, SCP.dim_y1:])
             
-            self.PCE, self.hermite_coefficients = cp.fit_regression(self.expansion, xi_samples[:self.expansion.size, :].T, f_val, retall=1)
+            self.PCE, self.hermite_coefficients = cp.fit_regression(self.expansion, xi_samples[:, :].T, f_val, retall=1)
         
         else:
             self.expansion = deepcopy(expansion)

@@ -4,11 +4,17 @@ from src.SurrogateFunction import Surrogate as Surrogate
 import numpy as np
 
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+import functools
+
 
 from smt.sampling_methods import LHS
 
 class TestSurrogate_1D(unittest.TestCase):
-    
+    """
+        1-dimensional linear problem. Keep z constant, and test that surrogate
+        modeling works for a linear 1 dimensional function.
+    """
     def setUp(self):
         def y(z, y):
             return z + y
@@ -58,7 +64,10 @@ class TestSurrogate_1D(unittest.TestCase):
         np.testing.assert_equal(y_out.shape, np.array([10000, 1]))
 
 class TestSurrogate_cosine(unittest.TestCase):
-    
+    """
+        1-dimensional nonlinear case. Keep z constant, and test that
+        surrogate accurately models 1-D nonlinear function.
+    """
     def setUp(self):
         def y(z, y):
             return z*np.cos(y)
@@ -126,12 +135,15 @@ class TestSurrogate_cosine(unittest.TestCase):
         y_out_enriched = surrogate_enriched.sample(z_vals, y_coupling_test, xi=np.zeros((n_sample, 1)))
 
         np.testing.assert_almost_equal(y_out_enriched, y_out, decimal=5)
-
-class TestConvergence_1D(unittest.TestCase):
-    pass
+    
+    def testConvergence(self):
+        pass
 
 class TestConvergence_2D(unittest.TestCase):
-
+    """
+        2-dimensional nonlinear case. Test that the solution of the surrogate converges
+        as the number of conditioning points increases. Both z and y are varied.
+    """
     def setUp(self):
         def y(z, y_coupling):
             return z*np.cos(5*y_coupling)
@@ -152,25 +164,46 @@ class TestConvergence_2D(unittest.TestCase):
         self.rng = np.random.default_rng()
     
     # move to src/visualize.py
-    def _plotError(self, zz, yy, out_exact, iteration):
-        out = self.surrogate(zz.reshape(-1, 1), yy.reshape(-1, 1), xi=np.zeros((zz.size, 1)))
-        err = np.power(out_exact - out, 2.)
+    """
+        Plot the error over the plane. Used in this context to plot one frame of the error gif,
+        but can be used to plot simple images as well.
+    """
+    def _plotError(self, err, iteration, ax):
+        #fig, ax = plt.subplots(figsize=(5, 5))
+        ax.clear() 
         
-        err = err.reshape(zz.shape[0], -1)
-        
-        fig, ax = plt.subplots(figsize=(5, 5))
-        
-        
-        ax.imshow(err, extent=[0., 5., 0., np.pi], interpolation=None, aspect='auto', origin='lower')
-        ax.scatter(self.surrogate.DoE_z.flatten(), self.surrogate.DoE_coupling.flatten(), color='red', marker='x', label='Training point')
+        img = ax.imshow(err, extent=[0., 5., 0., np.pi], interpolation=None, aspect='auto', origin='lower')
+        data = ax.scatter(self.surrogate.DoE_z.flatten(), self.surrogate.DoE_coupling.flatten(), color='red', marker='x', label='Training point')
         
         ax.set_xlabel('z')
         ax.set_ylabel('y_coupling')
 
         ax.set_title('$L^2$ error of GP conditioned on %d points' % self.surrogate.DoE_z.shape[0])
 
-        plt.savefig('img/testing/surrogate_convergence/%02d_2d.png' % iteration)
+        #plt.savefig('img/testing/surrogate_convergence/%02d_2d.png' % iteration)
+        return img, data 
+    def _calc_l2_error(self, err):
+        return err.mean() * (self.lims_z[1]-self.lims_z[0])*(self.lims_y[1]-self.lims_y[0])
+    """
+        Calculates the error of the surrogate model, and plots one frame of the gif of the
+        error as the surrogate is conditioned on more and more observations.
+    """
+    def _calcError(self, iteration, zz, yy, out_exact, ax):
+        while iteration+2 > self.surrogate.DoE_z.shape[0]:
+            self.surrogate.enrich(np.array([self.DoE_full[iteration+2, 0]]), np.array([self.DoE_full[iteration+2, 1]]))
+        out = self.surrogate(zz.reshape(-1, 1), yy.reshape(-1, 1), xi=np.zeros((zz.size, 1)))
+        err = np.power(out_exact - out, 2.)
+        err = err.reshape(zz.shape[0], -1)
+        
+        if self.surrogate.DoE_z.shape[0] > self.npt_hist[-1]:
+            self.npt_hist.append(self.surrogate.DoE_z.shape[0])
+            self.err_hist.append(self._calc_l2_error(err))
 
+        return self._plotError(err, iteration+1, ax)
+    """
+        Plot gif of error over the domain Z\\times C, as we keep adding more points.
+        Also measure the L2 error, and plot the convergence rate.
+    """
     def testConvergence(self):
         z = np.linspace(self.lims_z[0], self.lims_z[1], 100)
         y_coupling = np.linspace(self.lims_y[0], self.lims_y[1], 100)
@@ -178,10 +211,33 @@ class TestConvergence_2D(unittest.TestCase):
         zz, yy = np.meshgrid(z, y_coupling)
         
         out_exact = self.y(zz.reshape(-1, 1), yy.reshape(-1, 1))
+        out = self.surrogate(zz.reshape(-1, 1), yy.reshape(-1, 1), xi=np.zeros((zz.size, 1)))
         
-        self._plotError(zz, yy, out_exact, 0)
+        err = np.power(out_exact - out, 2.)
+        err = err.reshape(zz.shape[0], -1)
+        
+        self.npt_hist = [self.surrogate.DoE_z.shape[0]]
+        self.err_hist = [self._calc_l2_error(err)]
 
-        for i in range(10):
-            self.surrogate.enrich(np.array([self.DoE_full[i+2, 0]]), np.array([self.DoE_full[i+2, 1]]))
-            
-            self._plotError(zz, yy, out_exact, i+1)
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ani = FuncAnimation(fig, functools.partial(self._calcError, zz=zz, yy=yy, out_exact=out_exact, ax=ax), interval=300, blit=True, repeat=True, frames=30)
+        ani.save("img/testing/surrogate_convergence.gif", dpi=300, writer=PillowWriter(fps=1))
+
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+        ax[0].grid()
+
+        ax[0].plot(self.npt_hist, self.err_hist)
+        
+        ax[1].grid()
+        ax[1].loglog(self.npt_hist, self.err_hist)
+        
+        ax[0].set_xlabel('Number of points $N$')
+        ax[0].set_ylabel(r'$L^2$ error of GP')
+
+        ax[1].set_xlabel(r'$\log$ number of points $\log (N)$')
+        ax[1].set_ylabel(r'$\log L^2$ error of GP')
+
+        fig.suptitle(r'$L^2$ error of GP conditioned on N points')
+
+        plt.savefig('img/testing/surrogate_convergence/convergence_rate.png')

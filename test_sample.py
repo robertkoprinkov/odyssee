@@ -33,6 +33,7 @@ klgp = KL_GP(np.array([-4.5, -2.3, 0.5, 3.5]), sproblem, 3)
 plotter = Plotter('img', sproblem)
 fig_EI, ax_EI = plotter.plot_EI(klgp)
 
+print(klgp.truncation_index, len(klgp.phi_GP), klgp.phi.shape)
 klgp.getPCE(0.1)
 print(klgp.getGaussianStatistics(-3.))
 klgp.EI(2.)
@@ -49,10 +50,10 @@ for i in tqdm(range(10)):
     
     fig_EI, ax_EI = plotter.plot_EI(optim.KL_GP)
 
-    fig, ax = plotter.plot_surrogates(optim.KL_GP, -3., 'img/%d_surrogate.png' % i)
+    fig, ax = plotter.plot_surrogates(optim.KL_GP.SCP, -3., 'img/%d_surrogate.png' % i)
     
     print(optim.KL_GP.SCP.y1.DoE_z)
-    fig, ax = plotter.plot_surrogates(optim.KL_GP, optim.KL_GP.SCP.y1.DoE_z[-1], 'img/%d_surrogate_enriched.png' % i)
+    fig, ax = plotter.plot_surrogates(optim.KL_GP.SCP, optim.KL_GP.SCP.y1.DoE_z[-1], 'img/%d_surrogate_enriched.png' % i)
 
     ax.scatter(optim.KL_GP.SCP.y2.f_DoE[-1], optim.KL_GP.SCP.y2.DoE_coupling[-1], color='green', marker='x')
     ax.scatter(optim.KL_GP.SCP.y1.DoE_coupling[-1], optim.KL_GP.SCP.y1.f_DoE[-1], color='blue', marker='x')

@@ -40,7 +40,7 @@ class ScalarCoupledProblem():
                              was achieved, and the second giving the last value of y.
     """
     def solve(self, z, n_iter=1000, tol_abs=1e-6):
-        if type(z) is float:
+        if isinstance(z, float):
             assert(self.dim_z == 1)
             z = np.array([z])
 

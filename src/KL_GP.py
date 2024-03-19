@@ -16,16 +16,19 @@ class KL_GP():
 
     def __init__(self, DoE_z, SCP, order, truncated=True):
         self.rng = np.random.default_rng()
-        self.sampling_z = LHS(xlimits=np.array([[0., 1.], [0., 1.], [0., 1.]]), random_state=23)
 
+        
         self.DoE_z = DoE_z.copy()
         if len(self.DoE_z.shape) == 1: # sequence of floats
             self.DoE_z = self.DoE_z.reshape(-1, 1)
         self.SCP = deepcopy(SCP)
+        
+        # used for finding starting points in the optimization for finding z_next
+        self.sampling_z = LHS(xlimits=np.repeat([[0., 1.]], self.DoE_z.shape[1], axis=0))
          
         self.order = order
         self.truncated = truncated
-
+        
         self.PCE_DoE = []
         
         self.A = []
@@ -61,46 +64,88 @@ class KL_GP():
         self.eigval = self.eigval[phi_ordering]
         self.phi    = self.phi[phi_ordering]
         
+        # train GPs interpolations and calculation truncation of eigenvectors
         self.phi_GP[0].set_training_values(self.DoE_z, self.A[:, 0])
         self.phi_GP[0].train()
         
         cumulative = np.cumsum(self.eigval/np.sum(self.eigval))
+        self.phi_GP_energy = cumulative
         self.covered = cumulative > 1-1e-6
 
         if self.truncated:
+            # better name => n_truncated_terms?
             self.truncation_index = np.arange(self.covered.shape[0])[self.covered].min()+1
         else:
-            self.truncation_index = None
+            self.truncation_index = self.phi.shape[0]
 
         for coeff_i, phi_i in enumerate(self.phi):
-            if coeff_i+1 > len(self.phi_GP):
+            if coeff_i+2 > len(self.phi_GP):
                 self.phi_GP.append(KRG(theta0=[1e-2]*np.ones(self.SCP.dim_z), print_prediction=False, print_global=False))
-            GP = self.phi_GP[coeff_i]
+            GP = self.phi_GP[coeff_i+1]
             GP.set_training_values(self.DoE_z, phi_i)
             GP.train()
 
             if self.truncated and self.covered[coeff_i]:
                 break
-    
       
     """
         Get PCE expansion at one single point. 
     """
     def getPCE(self, z, eta=None):
         if eta is None:
-            eta = self.rng.normal(size=(self.truncation_index))
-        else:
-            assert(eta.shape[0] == self.truncation_index)
+            eta = self.rng.normal(size=(self.truncation_index+1))
+        assert(eta.shape[0] == self.truncation_index+1)
         
-        hermite_coefficients = np.zeros(self.A.shape[1])
+        hermite_coefficients = np.zeros((self.A.shape[1], 1))
 
-        hermite_coefficients[0] = self.phi_GP[0].predict_values(np.array([z])) + eta[0]*self.phi_GP[0].predict_variances(np.array([z]))
+        hermite_coefficients[0, 0] = (self.phi_GP[0].predict_values(np.array([z])) + eta[0]*self.phi_GP[0].predict_variances(np.array([z]))).item()
         
-        for k in range(self.truncation_index-1):
+        for k in range(self.truncation_index):
             for j in range(1, self.A.shape[1]):
-                hermite_coefficients[j] += (self.A[:, j] @ self.phi[k])*(self.phi_GP[k+1].predict_values(np.array([z])) +
-                                            eta[k+1]*self.phi_GP[k+1].predict_variances(np.array([z])))
+                hermite_coefficients[j, 0] += ((self.A[:, j] @ self.phi[k])*(self.phi_GP[k+1].predict_values(np.array([z])) +
+                                            eta[k+1]*self.phi_GP[k+1].predict_variances(np.array([z])))).item()
         return PCE(z, order=self.order, hermite_coefficients=hermite_coefficients, expansion=self.expansion)
+    
+    """
+        Sample from KL GP at point z, using monte carlo sampling. xi and eta are the random variables that 
+        determine the sample from the disciplinary solver GPs and the KL GP respectively.
+        
+        It is also possible to sample by calculating the mean and variance of the Gaussian distribution
+        at z\\in Z with the self.getGaussianStatistics() function.
+    """
+    def sample(self, z, xi=None, eta=None, n_samples=10000):
+        if isinstance(z, float) and self.SCP.dim_z == 1:
+            z = np.array([z])
+        if len(z.shape) == 1:
+            z = np.repeat(np.array([z]), n_samples, axis=0)
+        
+        if xi is None:
+            xi = self.rng.normal(size=(n_samples, 2))
+        if eta is None:
+            eta = self.rng.normal(size=(n_samples, self.truncation_index+1))
+
+        assert (xi.shape[0]  == n_samples)
+        assert (z.shape[0]   == n_samples)
+        assert (eta.shape[0] == n_samples)
+
+        mean = self.phi_GP[0].predict_values(z).flatten()
+        var  = self.phi_GP[0].predict_variances(z).flatten()
+        
+        ret = np.zeros((n_samples, 1))
+        
+        ret[:, 0] = mean + eta[:, 0] * np.sqrt(var)
+        
+        for k in range(self.truncation_index): # only support one-dimensional output for now
+            mean_gp = self.phi_GP[k+1].predict_values(z).flatten()
+            sigma_gp  = eta[:, k] * np.sqrt(self.phi_GP[k+1].predict_variances(z).flatten())
+            
+            for j in range(1, self.A.shape[1]):
+                mean = (self.A[:, j] @ self.phi[k] * self.expansion[j](xi[:, 0], xi[:, 1]))               * mean_gp
+                sigma = (self.A[:, j] @ self.phi[k] * self.expansion[j](xi[:, 0], xi[:, 1]))              * sigma_gp
+                
+                ret[:, 0] += mean + sigma
+        
+        return ret
 
     """
         Returns mean and variance of Random Variable Y(z, \\xi_k, \\mu) for fixed \\xi_k. This RV is Gaussian,
@@ -110,12 +155,13 @@ class KL_GP():
                   all samples are obtained at the same point z in space. If self.SCP.dim_z is 1, a float is also accepted.
         @param xi (Optional) np.ndarray of size (n_samples, 2). If not supplied, sampled from normal distribution.
         @param n_samples Number of samples.
+        @param return_intermediate Returns all intermediate means and standard deviations if True.
     
-        @return xi, mean, sigma np.ndarrays of sizes respectively (n_samples, 2), (n_samples, 1) and (n_samples, 1)
+        @return xi, mean, sigma and optionally mean_intermediate and sigma_intermediate, np.ndarrays of sizes respectively (n_samples, 2), (n_samples), (n_samples) (self.truncation_index+1, n_samples) and (self.truncation_index+1, n_samples)
         
     """
-    def getGaussianStatistics(self, z, xi=None, n_samples=10000):
-        if type(z) is float and self.SCP.dim_z == 1:
+    def getGaussianStatistics(self, z, xi=None, n_samples=10000, return_intermediate=False):
+        if isinstance(z, float) and self.SCP.dim_z == 1:
             z = np.array([z])
         if len(z.shape) == 1:
             z = np.repeat(np.array([z]), n_samples, axis=0)
@@ -127,50 +173,64 @@ class KL_GP():
         
         mean = self.phi_GP[0].predict_values(z).flatten()
         var  = self.phi_GP[0].predict_variances(z).flatten()
-
-        for k in range(self.truncation_index-1): # only support one-dimensional output for now
+        
+        mean_intermediate = [mean.copy()]
+        var_intermediate = [var.copy()]
+        for k in range(self.truncation_index): # only support one-dimensional output for now
             mean_gp = self.phi_GP[k+1].predict_values(z).flatten()
             var_gp  = self.phi_GP[k+1].predict_variances(z).flatten()
             
             for j in range(1, self.A.shape[1]):
                 mean += (self.A[:, j] @ self.phi[k] * self.expansion[j](xi[:, 0], xi[:, 1]))             * mean_gp
                 var  += np.power(self.A[:, j] @ self.phi[k] * self.expansion[j](xi[:, 0], xi[:, 1]), 2.) * var_gp
+
+            if return_intermediate:
+                mean_intermediate.append(mean.copy())
+                var_intermediate.append(var.copy())
         sigma = np.sqrt(var)
-        return xi, mean, sigma
+        mean_intermediate = np.array(mean_intermediate)
+        sigma_intermediate = np.sqrt(np.array(var_intermediate))
+
+        if return_intermediate:
+            return xi, mean, sigma, mean_intermediate, sigma_intermediate
+        else:
+            return xi, mean, sigma
+    
     # does not work yet
+    # z must be constant
     def getGaussianStatisticsVectorized(self, z, xi=None, n_samples=10000):
-        if type(z) is float and self.SCP.dim_z == 1:
-            z = np.array([z])
         if len(z.shape) == 1:
-            z = np.repeat(np.array([z]), n_samples, axis=0)
-        
+            z = np.array([z])
+
         if xi is None:
             xi = self.rng.normal(size=(n_samples, 2))
             
-        assert(xi.shape[0] == n_samples and z.shape[0] == n_samples)
+        assert(xi.shape[0] == n_samples and z.shape[0] == 1)
+        assert(xi.shape[1] == 2 and z.shape[1] == self.SCP.dim_z)
         
         mean = []
         var = []
         
-        for k in range(1, self.truncation_index):
-            mean.append(self.phi_GP[k].predict_values(z).flatten())
-            var.append(self.phi_GP[k].predict_variances(z).flatten())
+        for k in range(self.truncation_index):
+            mean.append(self.phi_GP[k+1].predict_values(z).flatten())
+            var.append(self.phi_GP[k+1].predict_variances(z).flatten())
         mean = np.array(mean)
         var = np.array(var)
-
+        
+        print(mean.shape, self.phi.shape, self.truncation_index, len(self.phi_GP))
+        agg = self.A[:, 1:].T @ (self.phi @ np.diag(mean.flatten()))
+        print(agg.shape)
+        
+        means_ret = self.phi_GP[0].predict_values(z).flatten() * np.ones((n_samples, 1))
+        vars_ret = self.phi_GP[0].predict_variances(z).flatten() * np.ones((n_samples, 1))
+        
         poly_evals = []
         for j in range(1, self.A.shape[1]):
-            poly_evals.append(self.expansion[j](xi[:, 0], xi[:, 1]))
-        poly_evals = np.array(poly_evals)
-        print(self.phi.T[:, :self.truncation_index-1].shape, self.truncation_index) 
-        print(((self.A[:, 1:].T @ self.phi.T[:, :self.truncation_index-1]).T @ poly_evals).T.shape, mean.shape)
-        # really truncaiton_index-1?
-        mean = ((self.A[:, 1:].T @ self.phi.T[:, :self.truncation_index-1]).T @ poly_evals).T @ mean
-        var =  np.power((self.A[:, 1:].T @ self.phi.T[:, :self.truncation_index-1]).T @ poly_evals, 2.).T @ var
+            poly_eval = self.expansion[j](xi[:, 0], xi[:, 1])
+            
+            means_ret[:, 0] += np.sum(poly_eval.reshape(-1, 1) @ agg[j-1, :].reshape(1, -1), axis=1)
+            vars_ret[:, 0] += np.sum(poly_eval.reshape(-1, 1) @ agg[j-1, :].reshape(1, -1), axis=1)
         
-        mean += self.phi_GP[0].predict_values(z).flatten()
-        var += self.phi_GP[0].predict_variances(z).flatten()
-
         sigma = np.sqrt(var)
         return xi, mean, sigma
 
@@ -188,13 +248,10 @@ class KL_GP():
         
         xi, mean, sigma = self.getGaussianStatistics(z, xi, n_samples)
         
-        #_, min_DoE, sigma_DoE = self.getGaussianStatistics(self.DoE_z[0, :], xi)
-        # was part of DoE, so we do not expect any variance
-        #assert np.max(np.abs(sigma_DoE)) < 1e-6, np.abs(sigma_DoE).max()
-        
         min_DoE = self.PCE_DoE[0](xi[:, 0], xi[:, 1])
 
         for i, z_ in enumerate(self.DoE_z[1:, :]):
+            # too slow
             #_, mean_DoE, sigma_DoE = self.getGaussianStatistics(z_, xi)
             
             #assert np.max(np.abs(sigma_DoE)) < 1e-6, np.abs(np.max(sigma_DoE))
@@ -214,14 +271,15 @@ class KL_GP():
     """
         Calculate EI with Monte Carlo sampling
     """
-    def EI_sampling(self, z):
+    def EI_sampling(self, z, n_samples=10000):
         pass
-    
+
+
     """
         Add a given z to the DoE_z, and condition KL_GP on new z.
     """
     def add_z(self, z):
-        if (type(z) == float or type(z) == np.float64) and self.SCP.dim_z == 1:
+        if isinstance(z, float) and self.SCP.dim_z == 1:
             z = np.array([z])
         self.DoE_z = np.concatenate((self.DoE_z, np.array([z])), axis=0)
         self.PCE_DoE.append(PCE(z, self.SCP, self.order))
@@ -235,7 +293,7 @@ class KL_GP():
 
         @return argmax_{z} EI
     """
-    def z_next(self, n_starting_points=20):
+    def z_next(self, n_starting_points=20, log=True):
         z_range = self.SCP.lims_z
           
         def EI_(z, *args):
@@ -246,12 +304,18 @@ class KL_GP():
             return -EI_calc
         
         z_samples = self.sampling_z(n_starting_points)
+
+        if log:
+            print(z_samples[0])
         z_min = minimize(EI_, z_samples[0], method='COBYLA', options={'rhobeg': 0.5}, bounds=[(0., 1.)])
-        print(z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_min.x), z_min.fun)
+        
+        if log:
+            print(z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_min.x), z_min.fun)
         
         for i in range(1, n_starting_points):
             z_new = minimize(EI_, z_samples[i], method='COBYLA', options={'rhobeg': 0.5}, bounds=[(0., 1.)])
-            print(z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_new.x), z_new.fun)
+            if log:
+                print(z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_new.x), z_new.fun)
             if z_new.fun < z_min.fun:
                 z_min = z_new
         return z_range[:, 0] + ((z_range[:, 1]-z_range[:, 0])*z_min.x), z_min.fun

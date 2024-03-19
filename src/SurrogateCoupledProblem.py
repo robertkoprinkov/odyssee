@@ -27,11 +27,11 @@ class SurrogateCoupledProblem(ScalarCoupledProblem):
         self.dim_y2 = self.ScalarCP.dim_y2
 
         if type(DoE_y1) is int:
-            sampling_y1 = LHS(xlimits=np.concatenate((self.lims_z, self.lims_y2), axis=0), random_state=20)
+            sampling_y1 = LHS(xlimits=np.concatenate((self.lims_z, self.lims_y2), axis=0))
             DoE_y1 = sampling_y1(DoE_y1)
         
         if type(DoE_y2) is int:
-            sampling_y2 = LHS(xlimits=np.concatenate((self.lims_z, self.lims_y1), axis=0), random_state=20)
+            sampling_y2 = LHS(xlimits=np.concatenate((self.lims_z, self.lims_y1), axis=0))
             DoE_y2 = sampling_y2(DoE_y2)
         
         self.y1 = Surrogate(self.ScalarCP.y1, DoE_y1[:, :self.dim_z], DoE_y1[:, self.dim_z:])
@@ -56,7 +56,7 @@ class SurrogateCoupledProblem(ScalarCoupledProblem):
                              was achieved, and the second giving the last value of y.
     """
     def solve(self, z, xi=None, n_iter=1000, tol_abs=1e-6):
-        if type(z) == float or type(z) == np.float64: # include as optino everywhere
+        if isinstance(z, float):
             assert(self.dim_z == 1)
             z = np.array([z])
         if len(z.shape) == 1:

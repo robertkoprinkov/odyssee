@@ -14,11 +14,11 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 def y1(z, y2):
-    return z[:, 0] + np.power(z[:, 1], 2.) + z[:, 2] - 0.2*y2.reshape(-1, 1)[:, 0]
+    return (z[:, 0] + np.power(z[:, 1], 2.) + z[:, 2] - 0.2*y2.flatten()).reshape(-1, 1)
 def y2(z, y1):
-    return np.sqrt(y1.reshape(-1, 1)[:, 0]) + z[:, 0] + z[:, 1]
+    return (np.sqrt(y1.flatten()) + z[:, 0] + z[:, 1]).reshape(-1, 1)
 def f(z, y1, y2):
-    return (z[:, 0] + np.power(z[:, 2], 2) + np.exp(-y2.reshape(-1, 1)[:, 0]) + 10*np.cos(z[:, 1])).reshape(-1, 1)
+    return (z[:, 0] + np.power(z[:, 2], 2) + y1.flatten() + np.exp(-y2.flatten()) + 10*np.cos(z[:, 1])).reshape(-1, 1)
 
 problem = ScalarCP(y1, y2, f, np.array([[0., 10.], [-10., 10.], [0., 10.]]), np.array([1., 50.]), np.array([-1., 24.]))
 
@@ -26,7 +26,8 @@ sproblem = SCP(problem, 5, 5)
 
 plotter = Plotter('img_sellar', sproblem)
 
-DoE_z = LHS(xlimits=problem.lims_z, random_state=20)(20)
+DoE_z = LHS(xlimits=problem.lims_z, random_state=15)(20)
+
 klgp = KL_GP(DoE_z, sproblem, 3)
 
 optim = Optimize(klgp, n_starting_points_z=20)
