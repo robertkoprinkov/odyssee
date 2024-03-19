@@ -101,7 +101,6 @@ class TestKL_GP_1D(unittest.TestCase):
         Y_exact = []
         
         xi = self.rng.normal(size=(10000, 2))
-        P = stats.norm.pdf(xi[:, 0]) * stats.norm.pdf(xi[:, 1])
         Y_klgp_pce = []
         Y_klgp_mean = []
         Y_klgp_sigma = []
@@ -111,14 +110,14 @@ class TestKL_GP_1D(unittest.TestCase):
             
             # this is not correct
             # use quadrature rule
-            Y_exact.append(np.sum(pce(xi[:, 0], xi[:, 1]) * P))
+            Y_exact.append(np.mean(pce(xi[:, 0], xi[:, 1])))
             
-            Y_klgp_pce.append(np.sum(pce_klgp(xi[:, 0], xi[:, 1]) * P))
+            Y_klgp_pce.append(np.mean(pce_klgp(xi[:, 0], xi[:, 1])))
             
             _, mean, sigma = self.klgp.getGaussianStatistics(np.array([z_]), xi=xi)
 
-            Y_klgp_mean.append(np.sum(mean * P))
-            Y_klgp_sigma.append(np.sum(sigma * P))
+            Y_klgp_mean.append(np.mean(mean))
+            Y_klgp_sigma.append(np.mean(sigma))
 
         Y_exact = np.array(Y_exact)
         Y_klgp_pce = np.array(Y_klgp_pce)
@@ -134,6 +133,8 @@ class TestKL_GP_1D(unittest.TestCase):
         
         ax.plot(z, Y_klgp_pce, label='KLGP (PCE)', linestyle='--')
         
+        ax.plot(z, self.f(z, *self.scalarcp.solve(z.reshape(-1, 1))[1].T), label='Exact', linestyle='-')
+
         ax.set_xlabel('z')
         ax.set_ylabel(r'$Y_{\text{obj}}$')
         ax.grid()
